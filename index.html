@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Sign Language Live Detector</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body{background:#0d1117;color:#fff;font-family:Arial;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}
+    .box{text-align:center;position:relative}
+    video{width:700px;border:3px solid #00ff55;border-radius:10px}
+    #guide-box{border:3px dashed #00ff55;position:absolute;top:25%;left:25%;width:50%;height:50%;pointer-events:none;border-radius:10px}
+    #prediction{margin-top:15px;font-size:45px;color:#00ff55;font-weight:bold}
+    button{margin-top:12px;padding:8px 15px;border:1px solid #888;background:transparent;color:#fff;border-radius:8px;cursor:pointer}
+    button:hover{border-color:#00ff55;color:#00ff55}
+  </style>
+</head>
+<body>
+  <div class="box">
+    <video id="video" autoplay muted playsinline></video>
+    <div id="guide-box"></div>
+    <div id="prediction">...</div>
+    <button id="toggle-voice">Mute Voice</button>
+  </div>
+
+<script>
+let lastPrediction="", lastSpeakTime=0, voiceEnabled=true;
+const ENDPOINT="http://127.0.0.1:8000/predict";
+const SEND_INTERVAL_MS = 200;
+
+document.getElementById("toggle-voice").onclick=()=>{
+  voiceEnabled=!voiceEnabled;
+  document.getElementById("toggle-voice").textContent = voiceEnabled?"Mute Voice":"Unmute Voice";
+  if(!voiceEnabled) speechSynthesis.cancel();
+};
+
+async function initCam(){
+  const v=document.getElementById("video");
+  v.srcObject=await navigator.mediaDevices.getUserMedia({video:true});
+  v.onloadedmetadata=()=>tick();
+}
+
+async function sendFrame(){
+  const v=document.getElementById("video");
+  const c=document.createElement("canvas");
+  c.width=v.videoWidth; c.height=v.videoHeight;
+  c.getContext("2d").drawImage(v,0,0);
+  const blob=await new Promise(r=>c.toBlob(r,"image/jpeg",1.0));
+  const fd=new FormData();
+  fd.append("file",blob,"frame.jpg");
+  const r=await fetch(ENDPOINT,{method:"POST",body:fd});
+  return await r.json();
+}
+
+async function tick(){
+  const d=await sendFrame();
+  if(d){
+    if(d.confidence<0.75){document.getElementById("prediction").textContent="...";}
+    else{document.getElementById("prediction").textContent=d.prediction;}
+    if(voiceEnabled && d.prediction!=="no_hand" && d.prediction===lastPrediction){
+      const now=Date.now();
+      if(now-lastSpeakTime>1000){speechSynthesis.cancel();speechSynthesis.speak(new SpeechSynthesisUtterance(d.prediction));lastSpeakTime=now;}
+    }
+    lastPrediction=d.prediction;
+  }
+  setTimeout(tick,SEND_INTERVAL_MS);
+}
+
+initCam();
+</script>
+</body>
+</html>
